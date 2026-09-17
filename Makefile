@@ -16,11 +16,11 @@ SITE             ?= $(or $(call env-val,SITE_NAME),demo.localhost)
 ADMIN_PASSWORD   ?= $(or $(call env-val,ADMIN_PASSWORD),admin)
 DB_ROOT_PASSWORD ?= $(or $(call env-val,DB_PASSWORD),123)
 AI_MODEL         ?= $(or $(call env-val,AI_MODEL),phi4:14b)
+EMBED_MODEL      ?= $(or $(call env-val,EMBED_MODEL),nomic-embed-text)
 AGENT_URL        ?= http://agent:8484
 
 FY               := $(shell date +%Y-%m | awk -F- '{y = $$2<7 ? $$1-1 : $$1; print y"-07-01 "y+1"-06-30"}')
 SETUP_DEMO       ?= 1
-MODEL_MANIFEST    = $(HOME)/.ollama/models/manifests/registry.ollama.ai/library/$(subst :,/,$(AI_MODEL))
 
 COMPOSE = docker compose --project-name frappe-demo --project-directory . --env-file .env \
   -f $(FRAPPE_DOCKER)/compose.yaml \
@@ -64,11 +64,14 @@ agent-image: $(AGENT_REPO) ## Build the AI agent image
 mcp-image: $(MCP_REPO) ## Build the MCP server image
 	docker build $(BUILD_FLAGS) --tag=frappe-mcp-server:local --file=mcp/Dockerfile $(MCP_REPO)
 
-model: ## Check the configured model is present on the host
-	@test -e "$(MODEL_MANIFEST)" || { \
-	  echo "AI_MODEL=$(AI_MODEL) is not on this host." >&2; \
-	  echo "The stack mounts ~/.ollama/models read-only and cannot download it." >&2; \
-	  echo "Run: ollama pull $(AI_MODEL)" >&2; exit 1; }
+model: ## Check the configured models are present on the host
+	@for m in $(AI_MODEL) $(EMBED_MODEL); do \
+	  case $$m in *:*) ;; *) m="$$m:latest";; esac; \
+	  test -f "$(HOME)/.ollama/models/manifests/registry.ollama.ai/library/$$(echo $$m | tr : /)" || { \
+	    echo "$$m is not on this host." >&2; \
+	    echo "The stack mounts ~/.ollama/models read-only and cannot download it." >&2; \
+	    echo "Run: ollama pull $$m" >&2; exit 1; }; \
+	done
 
 up: $(FRAPPE_DOCKER) .env model ## Start the stack
 	$(COMPOSE) up -d

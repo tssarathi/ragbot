@@ -15,6 +15,8 @@ x-app: &app
     # ponytail: no pip install, so rag/pyproject.toml dependencies are not installed.
     # Put them in the image, or switch to `bench pip install -e apps/rag`.
     PYTHONPATH: /home/frappe/frappe-bench/apps/rag
+    RAG_OLLAMA_URL: http://ollama:11434
+    RAG_EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
 
 services:
   # configurator rebuilds sites/apps.txt from `ls -1 apps`, so it needs the mount too

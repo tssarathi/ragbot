@@ -1,5 +1,14 @@
+import json
+import os
+
 import frappe
+import requests
 from drive.utils import STATUS_ACTIVE, is_site_file
+
+OLLAMA_URL = os.environ.get("RAG_OLLAMA_URL", "http://ollama:11434")
+EMBED_MODEL = os.environ.get("RAG_EMBED_MODEL", "nomic-embed-text")
+EMBED_DIM = 768  # must match the VECTOR(768) column in kb/doctype/kb_chunk/kb_chunk.py
+EMBED_TIMEOUT = (5, 600)  # /api/embed stays silent until it has computed every vector
 
 WATCHED = ("status", "team")
 CHUNK_CHARS = 2000  # ~580 tokens of nomic-embed-text's 2048, sized for retrieval not for the window
@@ -87,6 +96,28 @@ def chunk(text: str) -> list[str]:
 	return out
 
 
+def embed(texts: list[str]) -> list[list[float]]:
+	"""One call for a whole file's chunks. Ollama does not add nomic's task prefix, so we do."""
+	# not frappe's make_post_request: it passes no timeout at all, so a hung Ollama would park
+	# this worker until RQ's 1500s death penalty fires
+	res = requests.post(
+		f"{OLLAMA_URL}/api/embed",
+		json={
+			"model": EMBED_MODEL,
+			"input": [f"search_document: {t}" for t in texts],
+			"truncate": False,  # a silent half-embedding is worse than a loud failure
+		},
+		timeout=EMBED_TIMEOUT,
+	)
+	res.raise_for_status()
+	vectors = res.json()["embeddings"]
+	if len(vectors) != len(texts):
+		frappe.throw(f"Ollama returned {len(vectors)} embeddings for {len(texts)} chunks")
+	if len(vectors[0]) != EMBED_DIM:
+		frappe.throw(f"{EMBED_MODEL} returns {len(vectors[0])}-dim vectors, the column is VECTOR({EMBED_DIM})")
+	return vectors
+
+
 def index_file(name: str):
 	doc = frappe.get_doc("File", name)
 	if doc.is_folder or is_site_file(doc):
@@ -97,11 +128,16 @@ def index_file(name: str):
 	# Read before deleting. Drive maps every read failure onto DoesNotExistError, so catching it
 	# here would commit an empty index on an S3 503 or an EIO. Let it raise and the job rolls back.
 	chunks = chunk(extract_text(doc))
+	vectors = embed(chunks) if chunks else []
 	frappe.db.delete("KB Chunk", {"file": name})
-	for seq, content in enumerate(chunks):
-		frappe.get_doc(
+	for seq, (content, vector) in enumerate(zip(chunks, vectors)):
+		row = frappe.get_doc(
 			{"doctype": "KB Chunk", "file": name, "team": doc.team, "seq": seq, "content": content}
 		).insert(ignore_permissions=True)
+		frappe.db.sql(
+			"UPDATE `tabKB Chunk` SET embedding = VEC_FromText(%s) WHERE name = %s",
+			(json.dumps(vector, allow_nan=False), row.name),
+		)
 	return {"file": name, "chunks": len(chunks)}
 
 
