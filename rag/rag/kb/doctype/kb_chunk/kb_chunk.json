@@ -57,6 +57,10 @@
    "report": 1,
    "role": "System Manager",
    "write": 1
+  },
+  {
+   "report": 1,
+   "role": "Drive User"
   }
  ],
  "row_format": "Dynamic",

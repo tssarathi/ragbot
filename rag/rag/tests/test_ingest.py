@@ -7,6 +7,7 @@ import frappe
 
 from rag import ingest
 from rag.ingest import CHUNK_CHARS, chunk, extract_text
+from rag.search import search
 
 TEXT = "Zurich café à la carte “quoted” – résumé"
 
@@ -114,3 +115,35 @@ class TestIndexFile(unittest.TestCase):
 		finally:
 			frappe.db.rollback()
 
+
+class TestSearchPermissions(unittest.TestCase):
+	def test_a_user_only_sees_files_shared_with_them(self):
+		"""The ACL is this feature's security boundary, so it needs a check that outlives me."""
+		files = frappe.get_all(
+			"File",
+			filters={"is_folder": 0, "status": "Active", "team": ["is", "set"]},
+			pluck="name",
+			limit=2,
+		)
+		if len(files) < 2:
+			self.skipTest("need two Active Drive files")
+		email = "rag-acl-probe@example.com"
+		try:
+			if not frappe.db.exists("User", email):
+				frappe.get_doc(
+					{
+						"doctype": "User",
+						"email": email,
+						"first_name": "Probe",
+						"send_welcome_email": 0,
+						"roles": [{"role": "Drive User"}],
+					}
+				).insert(ignore_permissions=True)
+			frappe.get_doc("File", files[0]).share(user=email, read=1)
+			frappe.set_user(email)
+			seen = {row["file"] for row in search("policy", limit=20)}
+			self.assertIn(files[0], seen, "shared file should be visible")
+			self.assertNotIn(files[1], seen, "unshared file leaked into results")
+		finally:
+			frappe.set_user("Administrator")
+			frappe.db.rollback()
