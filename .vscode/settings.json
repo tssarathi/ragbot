@@ -1,0 +1,37 @@
+{
+  "files.exclude": {
+    "**/.venv": true,
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.DS_Store": true,
+    "**/.ruff_cache": true,
+    "frappe-operator": true,
+    "graphify-out": true,
+    ".build": true,
+    "tmp/**": true
+  },
+  "search.exclude": {
+    "frappe-operator": true,
+    "graphify-out": true,
+    ".build": true,
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "uv.lock": true
+  },
+  "files.watcherExclude": {
+    "frappe-operator/**": true,
+    "graphify-out/**": true,
+    ".build/**": true
+  },
+  "python-envs.defaultEnvManager": "ms-python.python:system",
+  "yaml.customTags": [
+    "!reset scalar",
+    "!reset sequence",
+    "!reset mapping",
+    "!override scalar",
+    "!override sequence",
+    "!override mapping"
+  ]
+}
