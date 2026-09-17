@@ -1,0 +1,18 @@
+x-local: &local
+  platform: !reset null
+  pull_policy: never
+
+services:
+  configurator: *local
+  backend:      *local
+  websocket:    *local
+  queue-short:  *local
+  queue-long:   *local
+  scheduler:    *local
+  frontend:
+    <<: *local
+    ports:
+      - "${HTTP_PUBLISH_PORT:-8080}:8080"
+
+  db:
+    image: mariadb:12.3.3
