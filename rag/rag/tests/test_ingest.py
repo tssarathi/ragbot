@@ -2,7 +2,7 @@ import unittest
 from io import BytesIO
 from types import SimpleNamespace
 
-from rag.ingest import extract_text
+from rag.ingest import CHUNK_CHARS, chunk, extract_text
 
 TEXT = "Zurich café à la carte “quoted” – résumé"
 
@@ -31,3 +31,40 @@ class TestExtractText(unittest.TestCase):
 
 		doc = SimpleNamespace(mime_type="image/png", manager=SimpleNamespace(get_file=boom))
 		self.assertEqual(extract_text(doc), "")
+
+
+class TestChunk(unittest.TestCase):
+	def test_packs_paragraphs_without_losing_text(self):
+		doc = "\n\n".join(f"Section {i}. " + "words " * 80 for i in range(12))
+		chunks = chunk(doc)
+		self.assertGreater(len(chunks), 1)
+		self.assertTrue(all(len(c) <= CHUNK_CHARS for c in chunks))
+		self.assertEqual(" ".join(chunks).split(), doc.split())
+
+	def test_paragraph_longer_than_a_chunk(self):
+		# A PDF page often arrives as one blob with no blank line to split on.
+		chunks = chunk("x" * 5000)
+		self.assertEqual("".join(chunks), "x" * 5000)
+		self.assertTrue(all(len(c) <= CHUNK_CHARS for c in chunks))
+
+	def test_long_paragraph_splits_on_word_boundaries(self):
+		soup = " ".join(["word"] * 2000)
+		chunks = chunk(soup)
+		self.assertEqual(" ".join(chunks).split(), soup.split())
+		self.assertFalse(any(c.startswith(" ") or c.endswith(" ") for c in chunks))
+
+	def test_windows_line_endings(self):
+		paras = [f"Paragraph {i}. " + "word " * 60 for i in range(8)]
+		lf = "\n\n".join(paras)
+		self.assertEqual(chunk(lf.replace("\n", "\r\n")), chunk(lf))
+		self.assertEqual(chunk(lf.replace("\n", "\r")), chunk(lf))
+		self.assertFalse(any("\r" in c for c in chunk(lf.replace("\n", "\r\n"))))
+
+	def test_other_line_separators(self):
+		# A .txt upload can carry form feeds and Unicode separators; none should survive.
+		for sep in ("\f", "\v", "\x1c", "\x1d", "\x1e", "\u2028", "\u2029", "\u0085"):
+			self.assertEqual(chunk("A" * 20 + sep + "B" * 20), ["A" * 20 + "\n" + "B" * 20], repr(sep))
+
+	def test_nothing_to_chunk(self):
+		self.assertEqual(chunk(""), [])
+		self.assertEqual(chunk("   \n\n  "), [])

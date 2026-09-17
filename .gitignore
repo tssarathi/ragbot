@@ -12,3 +12,4 @@ graphify-out/
 .env
 .env.*
 __pycache__/
+.claude/

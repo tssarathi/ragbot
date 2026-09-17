@@ -1,11 +1,12 @@
 import frappe
 from drive.utils import STATUS_ACTIVE, is_site_file
 
-WATCHED = ("file_url", "file_name", "folder", "status", "team", "file_size")
+WATCHED = ("status", "team")
+CHUNK_CHARS = 2000  # ~580 tokens of nomic-embed-text's 2048, sized for retrieval not for the window
 
 
 def on_file_update(doc, method=None):
-	"""Queue a Drive file for (re)indexing when its content or placement changes."""
+	"""Queue a Drive file for (re)indexing when its content, status or team changes."""
 	if doc.is_folder or is_site_file(doc):
 		return
 	if doc.get_doc_before_save() and not any(doc.has_value_changed(f) for f in WATCHED):
@@ -20,6 +21,12 @@ def on_file_update(doc, method=None):
 		job_id=f"rag-index-{doc.name}",
 		name=doc.name,
 	)
+
+
+def on_file_trash(doc, method=None):
+	# Drive soft-deletes to status=Removed, so this only fires for a framework-level
+	# frappe.delete_doc, which would otherwise hit LinkExistsError on KB Chunk.file.
+	frappe.db.delete("KB Chunk", {"file": doc.name})
 
 
 def extract_text(doc) -> str:
@@ -39,14 +46,60 @@ def extract_text(doc) -> str:
 
 	try:
 		with pymupdf.open(stream=data, filetype="pdf") as pdf:
-			return "" if pdf.needs_pass else "\n\n".join(page.get_text() for page in pdf)
-	except pymupdf.FileDataError:  # mime_type comes from the extension, so this may not be a pdf
+			if pdf.needs_pass:
+				return ""
+			# "blocks" keeps paragraph boundaries; plain get_text() returns a whole page as
+			# one run-on paragraph that chunk() would cut mid-sentence. sort=True orders by
+			# (y1, x0): without it blocks arrive in content-stream order, so a PDF that writes
+			# its footer first indexes the footer first.
+			return "\n\n".join(
+				b[4].strip()
+				for page in pdf
+				for b in page.get_text("blocks", sort=True)
+				if b[6] == 0
+			)
+	except pymupdf.FileDataError:
 		return ""
+
+
+def chunk(text: str) -> list[str]:
+	"""Whole paragraphs packed up to CHUNK_CHARS, splitting any paragraph too long to fit."""
+	text = "\n".join(text.splitlines())  # a Windows upload has no "\n\n" at all
+	paras = []
+	for para in text.split("\n\n"):
+		para = para.strip()
+		while len(para) > CHUNK_CHARS:
+			cut = para.rfind(" ", 0, CHUNK_CHARS) + 1 or CHUNK_CHARS
+			paras.append(para[:cut].strip())
+			para = para[cut:].strip()
+		if para:
+			paras.append(para)
+
+	out, buf, size = [], [], 0
+	for para in paras:
+		if buf and size + len(para) > CHUNK_CHARS:
+			out.append("\n\n".join(buf))
+			buf, size = [], 0
+		buf.append(para)
+		size += len(para) + 2
+	if buf:
+		out.append("\n\n".join(buf))
+	return out
 
 
 def index_file(name: str):
 	doc = frappe.get_doc("File", name)
-	# ponytail: trashed files just skip; once the KB table lands this has to delete their rows
-	if doc.is_folder or is_site_file(doc) or doc.status != STATUS_ACTIVE or doc._not_in_disk():
+	if doc.is_folder or is_site_file(doc):
 		return
-	return {"file": name, "team": doc.team, "mime_type": doc.mime_type, "chars": len(extract_text(doc))}
+	if doc.status != STATUS_ACTIVE or doc._not_in_disk():
+		frappe.db.delete("KB Chunk", {"file": name})
+		return {"file": name, "chunks": 0}
+	# Read before deleting. Drive maps every read failure onto DoesNotExistError, so catching it
+	# here would commit an empty index on an S3 503 or an EIO. Let it raise and the job rolls back.
+	chunks = chunk(extract_text(doc))
+	frappe.db.delete("KB Chunk", {"file": name})
+	for seq, content in enumerate(chunks):
+		frappe.get_doc(
+			{"doctype": "KB Chunk", "file": name, "team": doc.team, "seq": seq, "content": content}
+		).insert(ignore_permissions=True)
+	return {"file": name, "chunks": len(chunks)}
