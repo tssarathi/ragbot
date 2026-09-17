@@ -6,5 +6,9 @@
   {
     "url": "https://github.com/frappe/drive",
     "branch": "develop"
+  },
+  {
+    "url": "https://github.com/vyogotech/frappe_ai",
+    "branch": "main"
   }
 ]
