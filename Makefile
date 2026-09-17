@@ -13,10 +13,13 @@ AGENT_REPO   ?= .build/frappe-ai-agent
 MCP_REPO     ?= .build/frappe-mcp-server
 
 SITE             ?= $(or $(call env-val,SITE_NAME),demo.localhost)
-ADMIN_PASSWORD   ?= admin
+ADMIN_PASSWORD   ?= $(or $(call env-val,ADMIN_PASSWORD),admin)
 DB_ROOT_PASSWORD ?= $(or $(call env-val,DB_PASSWORD),123)
 AI_MODEL         ?= $(or $(call env-val,AI_MODEL),phi4:14b)
 AGENT_URL        ?= http://agent:8484
+
+FY               := $(shell date +%Y-%m | awk -F- '{y = $$2<7 ? $$1-1 : $$1; print y"-07-01 "y+1"-06-30"}')
+SETUP_DEMO       ?= 1
 MODEL_MANIFEST    = $(HOME)/.ollama/models/manifests/registry.ollama.ai/library/$(subst :,/,$(AI_MODEL))
 
 COMPOSE = docker compose --project-name frappe-demo --project-directory . --env-file .env \
@@ -76,7 +79,7 @@ down: ## Stop the stack, keep the data
 destroy: ## Stop the stack and delete the data
 	$(COMPOSE) down --volumes
 
-site: ## Create the demo site and point frappe_ai at the agent
+site: ## Create the demo site, run setup and wire the agent
 	@$(COMPOSE) exec backend bench new-site "$(SITE)" \
 	  --mariadb-user-host-login-scope=% \
 	  --db-root-password $(DB_ROOT_PASSWORD) \
@@ -85,6 +88,19 @@ site: ## Create the demo site and point frappe_ai at the agent
 	  --set-default
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config frappe_ai_agent_url "$(AGENT_URL)"
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config -p frappe_ai_agent_url_unsafe_ok 1
+	@$(MAKE) wizard
+
+wizard: ## Complete the ERPNext setup wizard (idempotent)
+	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute \
+	  frappe.desk.page.setup_wizard.setup_wizard.setup_complete \
+	  --kwargs '{"args": {"language":"English","country":"Australia","timezone":"Australia/Adelaide","currency":"AUD","company_name":"L2X Technologies Pty Ltd","company_abbr":"L2X","chart_of_accounts":"Australia - Chart of Accounts with Account Numbers","fy_start_date":"$(word 1,$(FY))","fy_end_date":"$(word 2,$(FY))","setup_demo":$(SETUP_DEMO)}}' >/dev/null
+	@test -n "$$($(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.count --kwargs '{"dt":"Fiscal Year"}')" \
+	  || { echo 'wizard: no fiscal year created, setup failed silently' >&2; exit 1; }
+	@test -n "$$($(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.count --kwargs '{"dt":"Company"}')" \
+	  || { echo 'wizard: no company created, setup failed silently' >&2; exit 1; }
+	@test -n "$$($(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.count --kwargs '{"dt":"Account","filters":{"company":"L2X Technologies Pty Ltd"}}')" \
+	  || { echo 'wizard: company has no accounts, chart of accounts name is wrong' >&2; exit 1; }
+	@echo 'setup wizard complete'
 
 keys: .env ## Write Frappe API credentials for the MCP server into .env
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute \
@@ -109,4 +125,4 @@ logs: ## Follow the logs
 shell: ## Open a shell in the backend container
 	$(COMPOSE) exec backend bash
 
-.PHONY: setup help model image agent-image mcp-image up down destroy site keys apps bench logs shell
+.PHONY: setup help model wizard image agent-image mcp-image up down destroy site keys apps bench logs shell
