@@ -11,8 +11,63 @@ services:
   scheduler:    *local
   frontend:
     <<: *local
+    environment:
+      FRAPPE_SITE_NAME_HEADER: ${SITE_NAME:-demo.localhost}
     ports:
       - "${HTTP_PUBLISH_PORT:-8080}:8080"
 
   db:
     image: mariadb:12.3.3
+
+  ollama:
+    image: ollama/ollama:0.34.1
+    environment:
+      OLLAMA_NOPRUNE: "1"
+    volumes:
+      - type: bind
+        source: ${HOME:?HOME must be set}/.ollama/models
+        target: /root/.ollama/models
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+
+  mcp:
+    image: frappe-mcp-server:local
+    pull_policy: never
+    environment:
+      FRAPPE_BASE_URL: http://frontend:8080
+      FRAPPE_API_KEY: ${FRAPPE_API_KEY:-}
+      FRAPPE_API_SECRET: ${FRAPPE_API_SECRET:-}
+    volumes:
+      - type: bind
+        source: ./mcp/config.yaml
+        target: /app/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+  agent:
+    image: frappe-ai-agent:local
+    pull_policy: never
+    environment:
+      AI_AGENT_MCP_SERVER_URL: http://mcp:8080/mcp
+      AI_AGENT_FRAPPE_URL: http://frontend:8080
+      AI_AGENT_CORS_ORIGINS: '["http://${SITE_NAME:-demo.localhost}:${HTTP_PUBLISH_PORT:-8080}"]'
+      AI_AGENT_LLM_BASE_URL: http://ollama:11434
+      AI_AGENT_LLM_MODEL: ${AI_MODEL}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8484/health').raise_for_status()"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    ports:
+      - "${AGENT_PUBLISH_PORT}:8484"
+    depends_on:
+      - mcp
+      - ollama
+    restart: unless-stopped
