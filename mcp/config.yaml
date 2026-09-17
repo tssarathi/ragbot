@@ -1,0 +1,9 @@
+server:
+  port: 8080
+
+erpnext:
+  base_url: "http://frontend:8080"
+  timeout: "30s"
+  retry:
+    max_attempts: 5
+    initial_delay: "500ms"
