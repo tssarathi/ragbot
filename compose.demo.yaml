@@ -37,6 +37,17 @@ services:
       FRAPPE_SITE_NAME_HEADER: ${SITE_NAME:-demo.localhost}
     ports:
       - "${HTTP_PUBLISH_PORT:-8080}:8080"
+    volumes:
+      - type: bind
+        source: ./nginx-realtime-auth.conf
+        target: /etc/nginx/conf.d/realtime-auth.conf
+        read_only: true
+    networks:
+      # the realtime service authenticates a socket by fetching the site's own name back, so
+      # that name has to resolve inside the network too, not just in the browser
+      default:
+        aliases:
+          - ${SITE_NAME:-demo.localhost}
 
   db:
     image: mariadb:12.3.3
