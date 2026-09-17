@@ -10,3 +10,4 @@ graphify-out/
 
 .build/
 .env
+.env.*
