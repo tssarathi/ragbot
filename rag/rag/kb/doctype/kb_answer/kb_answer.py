@@ -33,16 +33,23 @@ class KBAnswer(Document):
 		super(Document, self).__init__(rows[0] if rows else {"doctype": "KB Answer", "name": self.name})
 
 
-def _question(filters):
-	"""Pull the question out of whichever filter shape frappe hands us."""
+def _question(filters) -> str:
+	"""Pull the question out of whichever filter shape and fieldname frappe hands us.
+
+	The MCP search tool lets the model pick the filter field and it guesses: `title` and
+	`name` come up as often as `question`, and they all mean the same thing here, so take
+	whichever text arrives. A fieldname the doctype does not declare never reaches this
+	function at all, frappe's validate_filters rejects the request first.
+	"""
 	if isinstance(filters, str):
 		filters = frappe.parse_json(filters)
 	if isinstance(filters, dict):
-		value = filters.get("question")
-		return (value[1] if isinstance(value, list | tuple) else value) or ""
-	for row in filters or []:
-		if len(row) >= 3 and row[-3] == "question":
-			return row[-1]
-		if len(row) == 2 and row[0] == "question":
-			return row[1]
+		values = list(filters.values())
+	else:
+		values = [row[-1] for row in filters or [] if len(row) >= 2]
+	for value in values:
+		if isinstance(value, list | tuple):  # ["like", "%parental leave%"]
+			value = value[-1]
+		if isinstance(value, str) and value.strip("% "):
+			return value.strip("% ")
 	return ""
