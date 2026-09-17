@@ -103,3 +103,33 @@ def index_file(name: str):
 			{"doctype": "KB Chunk", "file": name, "team": doc.team, "seq": seq, "content": content}
 		).insert(ignore_permissions=True)
 	return {"file": name, "chunks": len(chunks)}
+
+
+def reindex_all():
+	"""Queue every Active Drive file for indexing.
+
+	bench --site <site> execute rag.ingest.reindex_all
+
+	Frappe caps the queue at MAX_QUEUED_JOBS, so a big Drive stops early and reports
+	what is left. Re-run once the long queue drains. On any other failure use
+	`bench console`: bench execute hides the traceback behind a bogus NameError.
+	"""
+	names = frappe.get_all(
+		"File",
+		filters={"is_folder": 0, "status": STATUS_ACTIVE, "team": ["is", "set"]},
+		pluck="name",
+	)
+	queued = 0
+	for i, name in enumerate(names):
+		try:
+			job = frappe.enqueue(
+				"rag.ingest.index_file",
+				queue="long",
+				deduplicate=True,
+				job_id=f"rag-index-{name}",
+				name=name,
+			)
+		except frappe.QueueOverloaded:
+			return {"queued": queued, "remaining": len(names) - i}
+		queued += job is not None  # None means deduplicate skipped one already in flight
+	return {"queued": queued, "remaining": 0}
