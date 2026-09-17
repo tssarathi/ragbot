@@ -24,14 +24,16 @@ Drive at `/drive`, and the AI sidebar is the button in the ERPNext navbar.
 | File | Purpose |
 | --- | --- |
 | `apps.json` | Frappe applications compiled into the image |
+| `rag/` | The knowledge base app, bind-mounted into the containers |
 | `mcp/config.yaml` | MCP server settings |
 | `.env` | Ports, passwords and `AI_MODEL`, generated from `.env.example` on first run |
 
 Ollama runs in a container but mounts `~/.ollama/models` read-only, so `AI_MODEL` must name
 a model you have already pulled.
 
-Applications are baked into the image, so editing `apps.json` requires a rebuild and a clean
-site: `make destroy`, then `make setup`.
+Applications in `apps.json` are baked into the image, so editing it requires a rebuild and a
+clean site: `make destroy`, then `make setup`. `rag/` is mounted instead, so changes there
+need only a container restart.
 
 ## License
 

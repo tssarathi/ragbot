@@ -84,7 +84,7 @@ site: ## Create the demo site, run setup and wire the agent
 	  --mariadb-user-host-login-scope=% \
 	  --db-root-password $(DB_ROOT_PASSWORD) \
 	  --admin-password $(ADMIN_PASSWORD) \
-	  --install-app erpnext --install-app drive --install-app frappe_ai \
+	  --install-app erpnext --install-app drive --install-app frappe_ai --install-app rag \
 	  --set-default
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config frappe_ai_agent_url "$(AGENT_URL)"
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config -p frappe_ai_agent_url_unsafe_ok 1

@@ -1,0 +1,10 @@
+[project]
+name = "rag"
+description = "Knowledge base over Frappe Drive"
+authors = [{ name = "Sarathi Thirumalai Soundararajan" }]
+requires-python = ">=3.14"
+dynamic = ["version"]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"

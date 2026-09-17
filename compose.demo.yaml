@@ -2,13 +2,33 @@ x-local: &local
   platform: !reset null
   pull_policy: never
 
+# <<: takes a single anchor; `<<: [*a, *b]` silently drops !reset (docker/compose#11706)
+x-app: &app
+  <<: *local
+  volumes:
+    - type: bind
+      source: ./rag
+      target: /home/frappe/frappe-bench/apps/rag
+      bind:
+        create_host_path: false
+  environment:
+    # ponytail: no pip install, so rag/pyproject.toml dependencies are not installed.
+    # Put them in the image, or switch to `bench pip install -e apps/rag`.
+    PYTHONPATH: /home/frappe/frappe-bench/apps/rag
+
 services:
-  configurator: *local
-  backend:      *local
+  # configurator rebuilds sites/apps.txt from `ls -1 apps`, so it needs the mount too
+  configurator:
+    <<: *app
+  backend:
+    <<: *app
   websocket:    *local
-  queue-short:  *local
-  queue-long:   *local
-  scheduler:    *local
+  queue-short:
+    <<: *app
+  queue-long:
+    <<: *app
+  scheduler:
+    <<: *app
   frontend:
     <<: *local
     environment:
