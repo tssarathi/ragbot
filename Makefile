@@ -27,7 +27,7 @@ $(FRAPPE_DOCKER):
 .env:
 	cp .env.example .env
 
-image: $(FRAPPE_DOCKER) ## Build the image with erpnext
+image: $(FRAPPE_DOCKER) ## Build the image with erpnext and drive
 	docker build $(BUILD_FLAGS) \
 	  --build-arg=FRAPPE_PATH=https://github.com/frappe/frappe \
 	  --build-arg=FRAPPE_BRANCH=$(FRAPPE_BRANCH) \
@@ -51,7 +51,7 @@ site: ## Create the demo site
 	  --mariadb-user-host-login-scope=% \
 	  --db-root-password $(DB_ROOT_PASSWORD) \
 	  --admin-password $(ADMIN_PASSWORD) \
-	  --install-app erpnext \
+	  --install-app erpnext --install-app drive \
 	  --set-default
 
 apps: ## List the apps in the image

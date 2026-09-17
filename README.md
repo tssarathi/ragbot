@@ -1,13 +1,13 @@
 # ragbot
 
-Frappe and ERPNext as a reproducible container stack.
+Frappe, ERPNext and Frappe Drive as a reproducible container stack.
 
 ## Requirements
 
 | Requirement | Version |
 | --- | --- |
 | Docker Engine | 23.0 or newer |
-| Free disk space | 5 GB |
+| Free disk space | 8 GB |
 
 Supported on macOS, Linux and Windows with WSL2. No other host dependencies.
 
@@ -25,7 +25,12 @@ make site
 | Username | `Administrator` |
 | Password | `admin` |
 
-Approximate durations: `make image` 5 minutes, `make up` 30 seconds, `make site` 3 minutes.
+`make image` compiles all applications from source and takes several minutes.
+
+| Application | Path |
+| --- | --- |
+| ERPNext | `/app` |
+| Frappe Drive | `/drive` |
 
 ## Commands
 
@@ -46,6 +51,7 @@ Approximate durations: `make image` 5 minutes, `make up` 30 seconds, `make site`
 $ make bench ARGS="--site demo.localhost list-apps"
 frappe  16.34.0 UNVERSIONED
 erpnext 16.35.0 UNVERSIONED
+drive   0.3.0   UNVERSIONED
 ```
 
 ## Configuration
@@ -72,7 +78,10 @@ make site SITE=mydemo.localhost ADMIN_PASSWORD=secret
 `apps.json` declares the Frappe apps compiled into the image. Frappe itself is always included.
 
 ```json
-[{ "url": "https://github.com/frappe/erpnext", "branch": "version-16" }]
+[
+  { "url": "https://github.com/frappe/erpnext", "branch": "version-16" },
+  { "url": "https://github.com/frappe/drive",   "branch": "develop"    }
+]
 ```
 
 Apps are baked in at build time, so a change requires a rebuild and a new site:
@@ -83,6 +92,7 @@ make image && make destroy && make up && make site
 
 ```console
 $ make apps
+drive
 erpnext
 frappe
 ```
