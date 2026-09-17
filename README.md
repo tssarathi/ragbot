@@ -35,4 +35,6 @@ site: `make destroy`, then `make setup`.
 
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0](LICENSE)
+
+ragbot builds on Frappe Drive (AGPL-3.0) and ERPNext (GPL-3.0).
