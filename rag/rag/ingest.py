@@ -1,5 +1,6 @@
 import json
 import os
+from uuid import uuid7
 
 import frappe
 import requests
@@ -96,15 +97,18 @@ def chunk(text: str) -> list[str]:
 	return out
 
 
-def embed(texts: list[str]) -> list[list[float]]:
-	"""One call for a whole file's chunks. Ollama does not add nomic's task prefix, so we do."""
+def embed(texts: list[str], prefix: str = "search_document") -> list[list[float]]:
+	"""One call for a whole batch. Ollama does not add nomic's task prefix, so we do.
+
+	Indexing uses search_document, querying uses search_query. Mixing them ruins retrieval.
+	"""
 	# not frappe's make_post_request: it passes no timeout at all, so a hung Ollama would park
 	# this worker until RQ's 1500s death penalty fires
 	res = requests.post(
 		f"{OLLAMA_URL}/api/embed",
 		json={
 			"model": EMBED_MODEL,
-			"input": [f"search_document: {t}" for t in texts],
+			"input": [f"{prefix}: {t}" for t in texts],
 			"truncate": False,  # a silent half-embedding is worse than a loud failure
 		},
 		timeout=EMBED_TIMEOUT,
@@ -131,12 +135,23 @@ def index_file(name: str):
 	vectors = embed(chunks) if chunks else []
 	frappe.db.delete("KB Chunk", {"file": name})
 	for seq, (content, vector) in enumerate(zip(chunks, vectors)):
-		row = frappe.get_doc(
-			{"doctype": "KB Chunk", "file": name, "team": doc.team, "seq": seq, "content": content}
-		).insert(ignore_permissions=True)
+		# Built by hand, not through the ORM: `embedding` is not a DocField, so an ORM insert
+		# omits it and a NOT NULL column then rejects the row. One statement also means the
+		# vector can never be missing for a row that exists.
 		frappe.db.sql(
-			"UPDATE `tabKB Chunk` SET embedding = VEC_FromText(%s) WHERE name = %s",
-			(json.dumps(vector, allow_nan=False), row.name),
+			"INSERT INTO `tabKB Chunk`"
+			" (name, creation, modified, owner, modified_by, file, team, seq, content, embedding)"
+			" VALUES (%s, NOW(6), NOW(6), %s, %s, %s, %s, %s, %s, VEC_FromText(%s))",
+			(
+				str(uuid7()),
+				frappe.session.user,
+				frappe.session.user,
+				name,
+				doc.team,
+				seq,
+				content,
+				json.dumps(vector, allow_nan=False),
+			),
 		)
 	return {"file": name, "chunks": len(chunks)}
 

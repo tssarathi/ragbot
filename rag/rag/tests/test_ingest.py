@@ -1,7 +1,11 @@
 import unittest
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import frappe
+
+from rag import ingest
 from rag.ingest import CHUNK_CHARS, chunk, extract_text
 
 TEXT = "Zurich café à la carte “quoted” – résumé"
@@ -68,3 +72,45 @@ class TestChunk(unittest.TestCase):
 	def test_nothing_to_chunk(self):
 		self.assertEqual(chunk(""), [])
 		self.assertEqual(chunk("   \n\n  "), [])
+
+
+def _reply(vectors):
+	return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"embeddings": vectors})
+
+
+class TestEmbed(unittest.TestCase):
+	def test_short_reply_is_not_silently_zipped_away(self):
+		with patch.object(ingest.requests, "post", return_value=_reply([[0.0] * 768])):
+			self.assertRaises(frappe.ValidationError, ingest.embed, ["a", "b"])
+
+	def test_wrong_dimension_names_the_model(self):
+		with patch.object(ingest.requests, "post", return_value=_reply([[0.0] * 384])):
+			self.assertRaises(frappe.ValidationError, ingest.embed, ["a"])
+
+
+class TestIndexFile(unittest.TestCase):
+	def test_a_chunk_row_survives_the_real_schema(self):
+		"""index_file builds its INSERT by hand because the ORM cannot write a VECTOR column.
+
+		Every other test here is pure-function, so a schema change that rejects that INSERT
+		would break all ingestion while the suite stayed green.
+		"""
+		files = frappe.get_all(
+			"File",
+			filters={"is_folder": 0, "status": "Active", "team": ["is", "set"]},
+			pluck="name",
+			limit=1,
+		)
+		if not files:
+			self.skipTest("no Active Drive file on this site")
+		try:
+			result = ingest.index_file(files[0])
+			self.assertGreater(result["chunks"], 0)
+			embedded = frappe.db.sql(
+				"SELECT COUNT(*) FROM `tabKB Chunk` WHERE file = %s AND embedding IS NOT NULL",
+				(files[0],),
+			)[0][0]
+			self.assertEqual(embedded, result["chunks"])
+		finally:
+			frappe.db.rollback()
+
