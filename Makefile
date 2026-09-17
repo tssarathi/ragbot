@@ -88,6 +88,7 @@ site: ## Create the demo site, run setup and wire the agent
 	  --set-default
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config frappe_ai_agent_url "$(AGENT_URL)"
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config -p frappe_ai_agent_url_unsafe_ok 1
+	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config allow_tests true
 	@$(MAKE) wizard
 
 wizard: ## Complete the ERPNext setup wizard (idempotent)

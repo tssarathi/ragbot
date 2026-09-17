@@ -1,5 +1,5 @@
 import frappe
-from drive.utils import is_site_file
+from drive.utils import STATUS_ACTIVE, is_site_file
 
 WATCHED = ("file_url", "file_name", "folder", "status", "team", "file_size")
 
@@ -22,5 +22,31 @@ def on_file_update(doc, method=None):
 	)
 
 
+def extract_text(doc) -> str:
+	"""Plain text for a Drive file, or "" for a format we cannot read yet."""
+	mime = doc.mime_type or ""
+	if mime != "application/pdf" and not mime.startswith("text/"):
+		return ""
+	data = doc.manager.get_file(doc).read()
+	if mime.startswith("text/"):
+		if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+			return data.decode("utf-16", "replace")
+		try:
+			return data.decode("utf-8-sig")
+		except UnicodeDecodeError:
+			return data.decode("cp1252", "replace")
+	import pymupdf  # 39MB RSS, keep it out of the web workers
+
+	try:
+		with pymupdf.open(stream=data, filetype="pdf") as pdf:
+			return "" if pdf.needs_pass else "\n\n".join(page.get_text() for page in pdf)
+	except pymupdf.FileDataError:  # mime_type comes from the extension, so this may not be a pdf
+		return ""
+
+
 def index_file(name: str):
-	frappe.logger("rag").info(f"index {name}")
+	doc = frappe.get_doc("File", name)
+	# ponytail: trashed files just skip; once the KB table lands this has to delete their rows
+	if doc.is_folder or is_site_file(doc) or doc.status != STATUS_ACTIVE or doc._not_in_disk():
+		return
+	return {"file": name, "team": doc.team, "mime_type": doc.mime_type, "chars": len(extract_text(doc))}
