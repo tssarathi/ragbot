@@ -61,7 +61,9 @@ def search_link_query(
 	tools expose to arbitrary server-side logic: its run_report tool cannot decode any report
 	that returns rows, and list_documents passes no free-text term.
 	"""
-	rows = search(txt or "", limit=page_length or 5)
+	# The MCP tool defaults page_length to 20, which would hand the model every chunk in the
+	# corpus. The sidebar front end gives up after 120s, so keep the prompt small.
+	rows = search(txt or "", limit=min(cint(page_length) or 3, 5))
 	for row in rows:
 		row["file_name"] = frappe.db.get_value("File", row["file"], "file_name")
 	if kwargs.get("as_dict"):
