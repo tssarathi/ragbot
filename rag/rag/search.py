@@ -48,3 +48,25 @@ def search(query: str, limit: int = 5) -> list[dict]:
 		if len(out) == limit:
 			break
 	return out
+
+
+@frappe.whitelist()
+def search_link_query(
+	doctype=None, txt=None, searchfield=None, start=0, page_length=10, filters=None, **kwargs
+):
+	"""Answer a `search_documents` call on KB Answer with semantic search.
+
+	Registered as a `standard_queries` hook, which is what frappe.desk.search.search_widget
+	calls in place of building its own LIKE query. That is the only route the MCP server's
+	tools expose to arbitrary server-side logic: its run_report tool cannot decode any report
+	that returns rows, and list_documents passes no free-text term.
+	"""
+	rows = search(txt or "", limit=page_length or 5)
+	for row in rows:
+		row["file_name"] = frappe.db.get_value("File", row["file"], "file_name")
+	if kwargs.get("as_dict"):
+		return [
+			{"value": r["file_name"], "description": r["content"], "distance": r["distance"]}
+			for r in rows
+		]
+	return [(r["file_name"], r["content"]) for r in rows]
