@@ -1,31 +1,37 @@
 # ragbot
 
-Frappe, ERPNext and Frappe Drive as a reproducible container stack.
+Frappe, ERPNext, Frappe Drive and a local AI agent as a reproducible container stack.
 
 ## Quick start
 
-Requires Docker Engine 23 or newer and 8 GB of free disk space.
+Requires Docker Compose 2.24 or newer, 12 GB of free disk space, and the model in
+`AI_MODEL` already pulled on the host with Ollama.
 
 ```sh
-make image   # compiles every application from source, several minutes
-make up
-make site
+make setup
 ```
 
-Sign in at <http://demo.localhost:8080> as `Administrator` / `admin`.
-ERPNext is at `/app`, Drive at `/drive`.
+This builds the images from source, starts the stack, creates the site and wires the agent.
+Around twenty minutes on a first run.
 
-`make help` lists the remaining targets. `make site` accepts `SITE=` and `ADMIN_PASSWORD=`.
+Sign in at <http://demo.localhost:8080> as `Administrator` / `admin`. ERPNext is at `/app`,
+Drive at `/drive`, and the AI sidebar is the button in the ERPNext navbar.
+
+`make help` lists the individual targets.
 
 ## Configuration
 
 | File | Purpose |
 | --- | --- |
-| `apps.json` | Applications compiled into the image |
-| `.env` | Ports and passwords, generated from `.env.example` on first run |
+| `apps.json` | Frappe applications compiled into the image |
+| `mcp/config.yaml` | MCP server settings |
+| `.env` | Ports, passwords and `AI_MODEL`, generated from `.env.example` on first run |
 
-Applications are baked into the image, so editing `apps.json` requires a rebuild and a
-clean site: `make destroy`, then the three commands above.
+Ollama runs in a container but mounts `~/.ollama/models` read-only, so `AI_MODEL` must name
+a model you have already pulled.
+
+Applications are baked into the image, so editing `apps.json` requires a rebuild and a clean
+site: `make destroy`, then `make setup`.
 
 ## License
 
