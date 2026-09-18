@@ -19,6 +19,19 @@ def on_doctype_update():
 	# and a zero vector is the nearest neighbour of every query. Only MODIFY refuses.
 	frappe.db.sql_ddl(f"ALTER TABLE `tabKB Chunk` ADD COLUMN IF NOT EXISTS embedding VECTOR({EMBED_DIM})")
 
+	declared = frappe.db.sql(
+		"SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()"
+		" AND TABLE_NAME = 'tabKB Chunk' AND COLUMN_NAME = 'embedding'"
+	)
+	if declared and declared[0][0].lower() != f"vector({EMBED_DIM})":
+		# ADD COLUMN above skips an existing column and MariaDB cannot redeclare a vector's
+		# width, so without this every insert fails with "Incorrect vector value", per file,
+		# forever, while migrate and health both report success.
+		frappe.throw(
+			f"`embedding` is {declared[0][0]}, not vector({EMBED_DIM}): drop the column, migrate"
+			" again, then run rag.ingest.reindex_all."
+		)
+
 	for problem in health()["problems"]:
 		click.secho(f"KB Chunk: {problem}", fg="yellow")
 
