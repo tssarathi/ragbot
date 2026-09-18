@@ -10,7 +10,9 @@ TAG               ?= $(or $(call env-val,CUSTOM_TAG),16)
 BUILD_FLAGS       ?=
 
 AGENT_REPO   ?= .build/frappe-ai-agent
+AGENT_REF    ?= f1bd18a
 MCP_REPO     ?= .build/frappe-mcp-server
+MCP_REF      ?= 6c14003
 
 SITE             ?= $(or $(call env-val,SITE_NAME),demo.localhost)
 ADMIN_PASSWORD   ?= $(or $(call env-val,ADMIN_PASSWORD),admin)
@@ -40,10 +42,12 @@ $(FRAPPE_DOCKER):
 	git -C $@ checkout --quiet $(FRAPPE_DOCKER_REF)
 
 $(AGENT_REPO):
-	git clone --quiet --depth 1 https://github.com/vyogotech/frappe-ai-agent.git $@
+	git clone --quiet https://github.com/vyogotech/frappe-ai-agent.git $@
+	git -C $@ checkout --quiet $(AGENT_REF)
 
 $(MCP_REPO):
-	git clone --quiet --depth 1 https://github.com/vyogotech/frappe-mcp-server.git $@
+	git clone --quiet https://github.com/vyogotech/frappe-mcp-server.git $@
+	git -C $@ checkout --quiet $(MCP_REF)
 
 .env:
 	cp .env.example .env
@@ -67,7 +71,8 @@ mcp-image: $(MCP_REPO) ## Build the MCP server image
 model: ## Check the configured models are present on the host
 	@for m in $(AI_MODEL) $(EMBED_MODEL); do \
 	  case $$m in *:*) ;; *) m="$$m:latest";; esac; \
-	  test -f "$(HOME)/.ollama/models/manifests/registry.ollama.ai/library/$$(echo $$m | tr : /)" || { \
+	  find "$(HOME)/.ollama/models/manifests" -type f -path "*/$$(echo $$m | tr : /)" 2>/dev/null \
+	    | grep -q . || { \
 	    echo "$$m is not on this host." >&2; \
 	    echo "The stack mounts ~/.ollama/models read-only and cannot download it." >&2; \
 	    echo "Run: ollama pull $$m" >&2; exit 1; }; \
@@ -75,6 +80,8 @@ model: ## Check the configured models are present on the host
 
 up: $(FRAPPE_DOCKER) .env model ## Start the stack
 	$(COMPOSE) up -d
+	@test -n "$(call env-val,FRAPPE_API_KEY)" \
+	  || echo 'note: FRAPPE_API_KEY is empty, so the mcp container will keep restarting. Run `make keys` once the site exists.' >&2
 
 down: ## Stop the stack, keep the data
 	$(COMPOSE) down
@@ -92,6 +99,7 @@ site: ## Create the demo site, run setup and wire the agent
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config frappe_ai_agent_url "$(AGENT_URL)"
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config -p frappe_ai_agent_url_unsafe_ok 1
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" set-config allow_tests true
+	@$(COMPOSE) exec -T backend bench pip install --quiet -e apps/rag
 	@$(MAKE) wizard
 
 wizard: ## Complete the ERPNext setup wizard (idempotent)
@@ -117,6 +125,20 @@ keys: .env ## Write Frappe API credentials for the MCP server into .env
 	@$(COMPOSE) up -d mcp
 	@echo 'credentials written to .env'
 
+check: ## Run the quality gates: lint, tests, index health, empty Error Log
+	@ruff check rag/
+	@$(COMPOSE) exec -T backend bench --site "$(SITE)" run-tests --app rag
+	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute rag.ingest.health \
+	  | tee /dev/stderr | grep -q '"problems": \[\]' \
+	  || { echo 'check: the index has problems, see above' >&2; exit 1; }
+	@if $(COMPOSE) exec -T backend bench --site "$(SITE)" execute rag.ingest.health | grep -q '"chunks": 0'; \
+	  then echo 'check: nothing is indexed, so the integration tests only skipped' >&2; exit 1; fi
+	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.sql \
+	  --kwargs '{"query":"SELECT COUNT(*) AS errors FROM `tabError Log`","as_dict":True}' \
+	  | grep -q '"errors": 0' \
+	  || { echo 'check: the Error Log is not empty' >&2; exit 1; }
+	@echo 'check: all gates passed'
+
 apps: ## List the apps in the image
 	@docker run --rm --entrypoint sh $(IMAGE):$(TAG) -c 'ls -1 apps'
 
@@ -129,4 +151,4 @@ logs: ## Follow the logs
 shell: ## Open a shell in the backend container
 	$(COMPOSE) exec backend bash
 
-.PHONY: setup help model wizard image agent-image mcp-image up down destroy site keys apps bench logs shell
+.PHONY: setup help model wizard image agent-image mcp-image up down destroy site keys check apps bench logs shell

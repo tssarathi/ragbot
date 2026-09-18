@@ -42,6 +42,8 @@ services:
         source: ./nginx-realtime-auth.conf
         target: /etc/nginx/conf.d/realtime-auth.conf
         read_only: true
+        bind:
+          create_host_path: false
     networks:
       # the realtime service authenticates a socket by fetching the site's own name back, so
       # that name has to resolve inside the network too, not just in the browser
@@ -91,7 +93,7 @@ services:
       AI_AGENT_FRAPPE_URL: http://frontend:8080
       AI_AGENT_CORS_ORIGINS: '["http://${SITE_NAME:-demo.localhost}:${HTTP_PUBLISH_PORT:-8080}"]'
       AI_AGENT_LLM_BASE_URL: http://ollama:11434
-      AI_AGENT_LLM_MODEL: ${AI_MODEL}
+      AI_AGENT_LLM_MODEL: ${AI_MODEL:-phi4:14b}
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8484/health').raise_for_status()"]
       interval: 30s

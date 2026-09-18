@@ -3,8 +3,27 @@ name = "rag"
 description = "Knowledge base over Frappe Drive"
 authors = [{ name = "Sarathi Thirumalai Soundararajan" }]
 requires-python = ">=3.14"
+# pymupdf is only here today because drive happens to require it. When drive drops it,
+# PDF ingest breaks one file at a time with nothing but an Error Log row to say so.
+dependencies = ["pymupdf>=1.24", "requests>=2.31"]
 dynamic = ["version"]
 
 [build-system]
 requires = ["flit_core >=3.4,<4"]
 build-backend = "flit_core.buildapi"
+
+# Frappe's own settings, so `ruff check rag/` means the same thing here as upstream.
+[tool.ruff]
+line-length = 110
+indent-width = 1
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RET", "SIM", "C4"]
+ignore = [
+ "E101",  # frappe indents with tabs
+ "W191",
+ "E501",  # long lines are the formatter's business, not lint's
+]
+
+[tool.ruff.format]
+indent-style = "tab"

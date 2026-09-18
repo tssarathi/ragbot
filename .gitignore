@@ -11,5 +11,6 @@ graphify-out/
 .build/
 .env
 .env.*
+!.env.example
 __pycache__/
 .claude/
