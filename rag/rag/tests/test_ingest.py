@@ -176,6 +176,16 @@ class TestUpdateHook(unittest.TestCase):
 			ingest.on_file_update(self._doc(new=True))
 		enqueue.assert_called_once()
 
+	def test_a_full_queue_does_not_fail_the_upload(self):
+		"""frappe checks the queue depth inside enqueue, before the after-commit deferral, so
+		this exception used to come out of on_update and abort the Drive save itself."""
+		with patch.object(
+			ingest.frappe, "enqueue", side_effect=frappe.QueueOverloaded("too many")
+		), patch.object(ingest.frappe, "log_error") as log_error:
+			ingest.on_file_update(self._doc(changed=("status",)))
+		log_error.assert_called_once()
+		self.assertIn("file1", log_error.call_args.args)
+
 	def test_a_file_that_leaves_drive_loses_its_chunks(self):
 		"""No team means no Drive. The rows would otherwise sit in the index forever."""
 		with patch.object(ingest.frappe.db, "delete") as delete, patch.object(ingest.frappe, "enqueue") as enqueue:

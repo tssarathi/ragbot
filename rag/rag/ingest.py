@@ -30,13 +30,18 @@ def on_file_update(doc, method=None):
 	# bytes, so trash-then-restore loses the restore. index_file is idempotent instead.
 	# Dotted string, not the callable: RQ unpickles before frappe.init(), and importing
 	# drive.utils that early raises "object is not bound".
-	frappe.enqueue(
-		"rag.ingest.index_file",
-		queue="long",
-		enqueue_after_commit=True,
-		job_id=f"rag-index-{doc.name}",
-		name=doc.name,
-	)
+	try:
+		frappe.enqueue(
+			"rag.ingest.index_file",
+			queue="long",
+			enqueue_after_commit=True,
+			job_id=f"rag-index-{doc.name}",
+			name=doc.name,
+		)
+	except frappe.QueueOverloaded:
+		# frappe checks the queue depth inside enqueue, before the after-commit deferral, so
+		# letting this out fails the upload itself. Name the file instead: reindex_all catches up.
+		frappe.log_error("rag: long queue full, file left unindexed", doc.name)
 
 
 def on_file_trash(doc, method=None):
