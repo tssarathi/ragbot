@@ -257,6 +257,22 @@ class TestIndexFile(unittest.TestCase):
 		finally:
 			frappe.db.rollback()
 
+	def test_a_rejected_request_is_not_retried_five_times(self):
+		"""A 404 for a missing model is permanent. Retrying it re-reads the blob and
+		re-extracts the text five more times before giving up on the same error."""
+		name = _a_drive_file(self)[0]
+		rejected = ingest.requests.Response()
+		rejected.status_code = 404
+		try:
+			with patch.object(
+				ingest.requests,
+				"post",
+				side_effect=ingest.requests.HTTPError("no such model", response=rejected),
+			):
+				self.assertRaises(ingest.requests.HTTPError, ingest.index_file, name)
+		finally:
+			frappe.db.rollback()
+
 	def test_an_unreadable_file_keeps_the_index_it_already_had(self):
 		"""Read before delete. Deleting first committed an empty index on any storage blip."""
 		name = _a_drive_file(self)[0]

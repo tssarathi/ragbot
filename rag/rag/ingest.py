@@ -155,6 +155,10 @@ def index_file(name: str):
 	try:
 		vectors = embed(chunks)
 	except requests.RequestException as exc:
+		if exc.response is not None and exc.response.status_code < 500:
+			# Ollama rejected the request, so five more attempts reject it five times, each one
+			# re-reading the blob and re-extracting the text. Fail now and log it once.
+			raise
 		# an Ollama restart should not leave the file unindexed: execute_job re-runs this up to
 		# five times with backoff. Retrying here as well would multiply the attempts.
 		raise frappe.RetryBackgroundJobError(f"Ollama unreachable: {exc}") from exc
