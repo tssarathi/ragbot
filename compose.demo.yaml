@@ -78,8 +78,6 @@ services:
     pull_policy: never
     environment:
       FRAPPE_BASE_URL: http://frontend:8080
-      FRAPPE_API_KEY: ${FRAPPE_API_KEY:-}
-      FRAPPE_API_SECRET: ${FRAPPE_API_SECRET:-}
     volumes:
       - type: bind
         source: ./mcp/config.yaml

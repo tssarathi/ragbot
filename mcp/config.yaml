@@ -7,3 +7,14 @@ erpnext:
   retry:
     max_attempts: 5
     initial_delay: "500ms"
+
+# The sidebar forwards the caller's sid, and the client prefers it over every other
+# credential, so each tool call runs as that user. Without this block the server logs
+# "Authentication disabled", ignores the sid and falls back to system-level credentials.
+auth:
+  enabled: true
+  require_auth: true
+  oauth2:
+    issuer_url: "http://frontend:8080"
+    token_info_url: "http://frontend:8080/api/method/frappe.integrations.oauth2.openid_profile"
+    validate_remote: true
