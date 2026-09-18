@@ -63,6 +63,7 @@ $(MCP_REPO):
 	cp .env.example .env
 
 image: $(FRAPPE_DOCKER) ## Build the image with erpnext, drive and frappe_ai
+	$(call at-ref,$(FRAPPE_DOCKER),$(FRAPPE_DOCKER_REF))
 	docker build $(BUILD_FLAGS) \
 	  --build-arg=FRAPPE_PATH=https://github.com/frappe/frappe \
 	  --build-arg=FRAPPE_BRANCH=$(FRAPPE_BRANCH) \
