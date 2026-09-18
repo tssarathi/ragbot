@@ -61,26 +61,3 @@ def _readable(rows: list[dict], limit: int) -> list[dict]:
 		if len(out) == limit:
 			break
 	return out
-
-
-@frappe.whitelist()
-def search_link_query(
-	doctype=None, txt=None, searchfield=None, start=0, page_length=10, filters=None, **kwargs
-):
-	"""Answer a `search_documents` call on KB Answer with semantic search.
-
-	A `standard_queries` hook, which search_widget calls instead of its own LIKE query. Frappe
-	checks is_whitelisted on it, and a failure there is a 404 page, not an error.
-	"""
-	if not (txt or "").strip():
-		return []  # an empty link field would embed "" and answer with five unrelated passages
-	# The MCP tool asks for 20, which is ~4KB of prompt, and the sidebar gives up after 120s.
-	rows = search(txt, limit=min(cint(page_length) or 3, 5))
-	for row in rows:
-		row["file_name"] = frappe.db.get_value("File", row["file"], "file_name")
-	if kwargs.get("as_dict"):
-		return [
-			{"value": r["file_name"], "description": r["content"], "distance": r["distance"]}
-			for r in rows
-		]
-	return [(r["file_name"], r["content"]) for r in rows]

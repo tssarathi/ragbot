@@ -12,7 +12,7 @@ BUILD_FLAGS       ?=
 AGENT_REPO   ?= .build/frappe-ai-agent
 AGENT_REF    ?= 777ca69
 MCP_REPO     ?= .build/frappe-mcp-server
-MCP_REF      ?= 5b722c6
+MCP_REF      ?= 06ab2e3
 
 SITE             ?= $(or $(call env-val,SITE_NAME),demo.localhost)
 ADMIN_PASSWORD   ?= $(or $(call env-val,ADMIN_PASSWORD),admin)

@@ -7,7 +7,6 @@ import frappe
 
 from rag import ingest
 from rag.ingest import CHUNK_CHARS, chunk, extract_text
-from rag.kb.doctype.kb_answer.kb_answer import _question
 from rag.search import search
 
 TEXT = "Zurich café à la carte “quoted” – résumé"
@@ -106,30 +105,6 @@ class TestEmbed(unittest.TestCase):
 	def test_wrong_dimension_names_the_model(self):
 		with patch.object(ingest.requests, "post", return_value=_reply([[0.0] * 384])):
 			self.assertRaises(frappe.ValidationError, ingest.embed, ["a"])
-
-
-class TestQuestionFilters(unittest.TestCase):
-	def test_every_filter_shape_and_fieldname_the_sidebar_sends(self):
-		"""The model picks the filter field itself, and it does not always pick `question`.
-
-		A shape this misses is a 417 in the sidebar, not a missing row: frappe rejects the
-		whole request, and the agent tells the user the search failed.
-		"""
-		q = "how many weeks of parental leave"
-		for filters in (
-			{"question": q},
-			{"title": q},  # what the model actually sent
-			{"name": q},
-			{"content": ["like", f"%{q}%"]},
-			f'{{"title": "{q}"}}',  # REST sends filters as a JSON string
-			[["KB Answer", "title", "like", f"%{q}%"]],
-			[["title", "=", q]],
-		):
-			self.assertEqual(_question(filters), q, filters)
-
-	def test_nothing_to_search_for(self):
-		for filters in (None, {}, [], "{}", {"distance": 0.4}):
-			self.assertEqual(_question(filters), "", filters)
 
 
 class TestEmbedRequest(unittest.TestCase):
