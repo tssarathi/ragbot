@@ -263,6 +263,15 @@ class TestIndexFile(unittest.TestCase):
 		finally:
 			frappe.db.rollback()
 
+	def test_an_ollama_outage_asks_the_queue_to_retry(self):
+		"""Otherwise a restart of Ollama leaves the file unindexed until someone notices."""
+		name = _a_drive_file(self)[0]
+		try:
+			with patch.object(ingest.requests, "post", side_effect=ingest.requests.ConnectionError("down")):
+				self.assertRaises(frappe.RetryBackgroundJobError, ingest.index_file, name)
+		finally:
+			frappe.db.rollback()
+
 	def test_an_unreadable_file_keeps_the_index_it_already_had(self):
 		"""Read before delete. Deleting first committed an empty index on any storage blip."""
 		name = _a_drive_file(self)[0]

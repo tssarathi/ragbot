@@ -147,7 +147,12 @@ def index_file(name: str):
 	# Read before deleting, and do not catch: Drive maps every read failure onto
 	# DoesNotExistError, so an S3 blip would otherwise commit an empty index.
 	chunks = chunk(extract_text(doc))
-	vectors = embed(chunks)
+	try:
+		vectors = embed(chunks)
+	except requests.RequestException as exc:
+		# an Ollama restart should not leave the file unindexed: execute_job re-runs this up to
+		# five times with backoff. Retrying here as well would multiply the attempts.
+		raise frappe.RetryBackgroundJobError(f"Ollama unreachable: {exc}") from exc
 	frappe.db.delete("KB Chunk", {"file": name})
 	for seq, (content, vector) in enumerate(zip(chunks, vectors, strict=True)):
 		# Raw SQL because `embedding` is not a DocField: an ORM insert would omit it.
