@@ -8,7 +8,8 @@
   "file",
   "team",
   "seq",
-  "content"
+  "content",
+  "model"
  ],
  "fields": [
   {
@@ -39,10 +40,17 @@
    "fieldtype": "Long Text",
    "label": "Content",
    "reqd": 1
+  },
+  {
+   "description": "The embedding model that produced this row's vector. Vectors from two models are not comparable, so a swap makes every distance meaningless with nothing to see in the data.",
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Embedding Model",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-09-18 00:00:00.000000",
+ "modified": "2026-09-18 07:00:00.000000",
  "modified_by": "Administrator",
  "module": "KB",
  "name": "KB Chunk",

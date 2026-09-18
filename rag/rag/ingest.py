@@ -1,5 +1,6 @@
 import json
 import os
+from itertools import batched
 from uuid import uuid7
 
 import frappe
@@ -10,6 +11,10 @@ OLLAMA_URL = os.environ.get("RAG_OLLAMA_URL", "http://ollama:11434")
 EMBED_MODEL = os.environ.get("RAG_EMBED_MODEL", "nomic-embed-text")
 EMBED_DIM = 768  # must match the VECTOR(768) column in kb/doctype/kb_chunk/kb_chunk.py
 EMBED_TIMEOUT = (5, 600)  # /api/embed stays silent until it has computed every vector
+# Measured at ~0.45s per chunk on CPU, so one whole book in one request would blow the read
+# timeout, lose the work and hold every vector in memory at once. The timeout only has to clear
+# one batch.
+EMBED_BATCH = 64
 
 WATCHED = ("status", "team")
 CHUNK_CHARS = 2000  # ~580 tokens of nomic-embed-text's 2048, sized for retrieval not for the window
@@ -18,16 +23,23 @@ CHUNK_CHARS = 2000  # ~580 tokens of nomic-embed-text's 2048, sized for retrieva
 def on_file_update(doc, method=None):
 	"""Queue a Drive file for (re)indexing when its content, status or team changes."""
 	if doc.is_folder or is_site_file(doc):
+		# A file that just left Drive keeps its chunks otherwise: nobody can ever match them
+		# and they still take candidate slots away from files that can be read.
+		if doc.get_doc_before_save() and doc.has_value_changed("team"):
+			frappe.db.delete("KB Chunk", {"file": doc.name})
 		return
 	if doc.get_doc_before_save() and not any(doc.has_value_changed(f) for f in WATCHED):
 		return
-	# dotted string, not the callable: RQ unpickles a callable before frappe.init(),
-	# and importing drive.utils that early raises "object is not bound"
+	# No deduplicate: it skips an enqueue while an earlier job is STARTED as well as QUEUED, and
+	# that job has already read the old status and bytes. Trash a file, restore it a second
+	# later, and the dedupe drops the restore: the job finishes, deletes every chunk, and the
+	# file stays unindexed forever. index_file is idempotent, so running it twice is cheap.
+	# Dotted string, not the callable: RQ unpickles a callable before frappe.init(),
+	# and importing drive.utils that early raises "object is not bound".
 	frappe.enqueue(
 		"rag.ingest.index_file",
 		queue="long",
 		enqueue_after_commit=True,
-		deduplicate=True,
 		job_id=f"rag-index-{doc.name}",
 		name=doc.name,
 	)
@@ -46,6 +58,10 @@ def extract_text(doc) -> str:
 		return ""
 	data = doc.manager.get_file(doc).read()
 	if mime.startswith("text/"):
+		# UTF-32 LE starts with the UTF-16 LE BOM, so it has to be tested first or its text
+		# decodes to NUL-interleaved nonsense
+		if data[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
+			return data.decode("utf-32", "replace")
 		if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
 			return data.decode("utf-16", "replace")
 		try:
@@ -98,10 +114,17 @@ def chunk(text: str) -> list[str]:
 
 
 def embed(texts: list[str], prefix: str = "search_document") -> list[list[float]]:
-	"""One call for a whole batch. Ollama does not add nomic's task prefix, so we do.
+	"""Embed every text, in batches. Ollama does not add nomic's task prefix, so we do.
 
 	Indexing uses search_document, querying uses search_query. Mixing them ruins retrieval.
 	"""
+	vectors = []
+	for batch in batched(texts, EMBED_BATCH, strict=False):  # a short last batch is the point
+		vectors += _embed_batch(list(batch), prefix)
+	return vectors
+
+
+def _embed_batch(texts: list[str], prefix: str) -> list[list[float]]:
 	# not frappe's make_post_request: it passes no timeout at all, so a hung Ollama would park
 	# this worker until RQ's 1500s death penalty fires
 	res = requests.post(
@@ -123,25 +146,26 @@ def embed(texts: list[str], prefix: str = "search_document") -> list[list[float]
 
 
 def index_file(name: str):
+	if not frappe.db.exists("File", name):
+		# hard-deleted between the enqueue and this job. on_file_trash already took the chunks.
+		return {"file": name, "chunks": 0}
 	doc = frappe.get_doc("File", name)
-	if doc.is_folder or is_site_file(doc):
-		return
-	if doc.status != STATUS_ACTIVE or doc._not_in_disk():
+	if doc.is_folder or is_site_file(doc) or doc.status != STATUS_ACTIVE or doc._not_in_disk():
 		frappe.db.delete("KB Chunk", {"file": name})
 		return {"file": name, "chunks": 0}
 	# Read before deleting. Drive maps every read failure onto DoesNotExistError, so catching it
 	# here would commit an empty index on an S3 503 or an EIO. Let it raise and the job rolls back.
 	chunks = chunk(extract_text(doc))
-	vectors = embed(chunks) if chunks else []
+	vectors = embed(chunks)
 	frappe.db.delete("KB Chunk", {"file": name})
-	for seq, (content, vector) in enumerate(zip(chunks, vectors)):
+	for seq, (content, vector) in enumerate(zip(chunks, vectors, strict=True)):
 		# Built by hand, not through the ORM: `embedding` is not a DocField, so an ORM insert
 		# omits it and a NOT NULL column then rejects the row. One statement also means the
 		# vector can never be missing for a row that exists.
 		frappe.db.sql(
 			"INSERT INTO `tabKB Chunk`"
-			" (name, creation, modified, owner, modified_by, file, team, seq, content, embedding)"
-			" VALUES (%s, NOW(6), NOW(6), %s, %s, %s, %s, %s, %s, VEC_FromText(%s))",
+			" (name, creation, modified, owner, modified_by, file, team, seq, content, model, embedding)"
+			" VALUES (%s, NOW(6), NOW(6), %s, %s, %s, %s, %s, %s, %s, VEC_FromText(%s))",
 			(
 				str(uuid7()),
 				frappe.session.user,
@@ -150,10 +174,57 @@ def index_file(name: str):
 				doc.team,
 				seq,
 				content,
+				EMBED_MODEL,
 				json.dumps(vector, allow_nan=False),
 			),
 		)
 	return {"file": name, "chunks": len(chunks)}
+
+
+def health():
+	"""Everything that would make search quietly wrong, in one place.
+
+	bench --site <site> execute rag.ingest.health
+	"""
+	zero = "[" + ",".join(["0"] * EMBED_DIM) + "]"
+	stats = frappe.db.sql(
+		"""
+		SELECT COUNT(*) AS chunks,
+		       COALESCE(SUM(embedding IS NULL), 0) AS unembedded,
+		       COALESCE(SUM(embedding = VEC_FromText(%(zero)s)), 0) AS zeroed,
+		       COALESCE(SUM(model IS NULL OR model != %(model)s), 0) AS other_model
+		FROM `tabKB Chunk`
+		""",
+		{"zero": zero, "model": EMBED_MODEL},
+		as_dict=True,
+	)[0]
+	stats = {k: int(v) for k, v in stats.items()}
+	stats["indexed"] = bool(
+		frappe.db.sql(
+			"SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()"
+			" AND TABLE_NAME = 'tabKB Chunk' AND INDEX_NAME = 'embedding'"
+		)
+	)
+	problems = []
+	if stats["unembedded"]:
+		problems.append(f"{stats['unembedded']} chunks have no vector, and no vector sorts ahead of every real match")
+	if stats["zeroed"]:
+		problems.append(
+			f"{stats['zeroed']} chunks have an all-zero vector, which is the nearest neighbour of"
+			" every question. A restored backup does this: frappe's mariadb-dump call has no"
+			" --hex-blob, so every vector comes back as zeroes with no error"
+		)
+	if stats["other_model"]:
+		problems.append(
+			f"{stats['other_model']} chunks were embedded by another model, not {EMBED_MODEL}."
+			" Two models put the same sentence in different places, so the distances mean nothing"
+		)
+	if stats["chunks"] and not stats["indexed"]:
+		problems.append("there is no vector index, so every search reads the whole table")
+	if problems:
+		problems.append("fix with `bench --site <site> execute rag.ingest.reindex_all`, then migrate")
+	stats["problems"] = problems
+	return stats
 
 
 def reindex_all():
