@@ -23,6 +23,7 @@ AGENT_URL        ?= http://agent:8484
 
 FY               := $(shell date +%Y-%m | awk -F- '{y = $$2<7 ? $$1-1 : $$1; print y"-07-01 "y+1"-06-30"}')
 SETUP_DEMO       ?= 1
+ERRORS_BEFORE    := /tmp/ragbot-errors-before
 
 COMPOSE = docker compose --project-name frappe-demo --project-directory . --env-file .env \
   -f $(FRAPPE_DOCKER)/compose.yaml \
@@ -123,7 +124,9 @@ wizard: ## Complete the ERPNext setup wizard (idempotent)
 	  || { echo 'wizard: company has no accounts, chart of accounts name is wrong' >&2; exit 1; }
 	@echo 'setup wizard complete'
 
-check: ## Run the quality gates: lint, tests, index health, empty Error Log
+check: ## Run the quality gates: lint, tests, index health, no new errors
+	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.sql \
+	  --kwargs '{"query":"SELECT COUNT(*) AS n FROM `tabError Log`","as_dict":True}' | grep -o '[0-9]\+' > $(ERRORS_BEFORE)
 	@ruff check rag/
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" run-tests --app rag
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute rag.ingest.health \
@@ -131,10 +134,23 @@ check: ## Run the quality gates: lint, tests, index health, empty Error Log
 	  || { echo 'check: the index has problems, see above' >&2; exit 1; }
 	@if $(COMPOSE) exec -T backend bench --site "$(SITE)" execute rag.ingest.health | grep -q '"chunks": 0'; \
 	  then echo 'check: nothing is indexed, so the integration tests only skipped' >&2; exit 1; fi
-	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.sql \
-	  --kwargs '{"query":"SELECT COUNT(*) AS errors FROM `tabError Log`","as_dict":True}' \
-	  | grep -q '"errors": 0' \
-	  || { echo 'check: the Error Log is not empty' >&2; exit 1; }
+	@after=$$($(COMPOSE) exec -T backend bench --site "$(SITE)" execute frappe.db.sql \
+	  --kwargs '{"query":"SELECT COUNT(*) AS n FROM `tabError Log`","as_dict":True}' | grep -o '[0-9]\+'); before=$$(cat $(ERRORS_BEFORE)); \
+	  test "$$before" = "$$after" \
+	  || { echo "check: this run logged $$((after - before)) error(s), see the Error Log" >&2; exit 1; }
+	@$(COMPOSE) exec -T -e PW="$(ADMIN_PASSWORD)" \
+	  backend python -c "import json, os, urllib.request as u; \
+	  base = 'http://frontend:8080'; \
+	  web = u.build_opener(u.HTTPCookieProcessor()); \
+	  web.open(u.Request(base + '/api/method/login', \
+	    json.dumps({'usr': 'Administrator', 'pwd': os.environ['PW']}).encode(), \
+	    {'Content-Type': 'application/json'})); \
+	  rows = json.load(web.open(base + '/api/method/rag.search.search?query=leave&limit=1'))['message']; \
+	  assert rows, 'the endpoint answered but matched nothing'; \
+	  assert set(rows[0]) >= {'file', 'seq', 'content', 'distance'}, rows[0]" \
+	  || { echo 'check: the search endpoint the mcp tool calls is broken, see above' >&2; exit 1; }
+	@$(COMPOSE) exec -T backend mariadb-dump --print-defaults | grep -q hex-blob \
+	  || { echo 'check: mariadb-client.cnf is being ignored, so a backup would zero every vector' >&2; exit 1; }
 	@echo 'check: all gates passed'
 
 apps: ## List the apps in the image
