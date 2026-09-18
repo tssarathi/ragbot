@@ -10,9 +10,9 @@ TAG               ?= $(or $(call env-val,CUSTOM_TAG),16)
 BUILD_FLAGS       ?=
 
 AGENT_REPO   ?= .build/frappe-ai-agent
-AGENT_REF    ?= f1bd18a
+AGENT_REF    ?= 777ca69
 MCP_REPO     ?= .build/frappe-mcp-server
-MCP_REF      ?= 6c14003
+MCP_REF      ?= 5b722c6
 
 SITE             ?= $(or $(call env-val,SITE_NAME),demo.localhost)
 ADMIN_PASSWORD   ?= $(or $(call env-val,ADMIN_PASSWORD),admin)
@@ -29,6 +29,15 @@ COMPOSE = docker compose --project-name frappe-demo --project-directory . --env-
   -f $(FRAPPE_DOCKER)/overrides/compose.mariadb.yaml \
   -f $(FRAPPE_DOCKER)/overrides/compose.redis.yaml \
   -f compose.demo.yaml
+
+# A clone rule only fires when its directory is missing, so the ref is checked out here
+# instead: otherwise a stale tree builds silently and the pin above means nothing.
+define at-ref
+@git -C $(1) cat-file -e $(2)^{commit} 2>/dev/null || git -C $(1) fetch --quiet origin
+@git -C $(1) diff --quiet && git -C $(1) diff --cached --quiet \
+  || { echo '$(1) has uncommitted changes; commit or stash them first' >&2; exit 1; }
+@git -C $(1) checkout --quiet --detach $(2)
+endef
 
 setup: ## Build everything and bring the whole demo up from scratch
 	$(MAKE) image agent-image mcp-image
@@ -63,9 +72,11 @@ image: $(FRAPPE_DOCKER) ## Build the image with erpnext, drive and frappe_ai
 	  $(FRAPPE_DOCKER)
 
 agent-image: $(AGENT_REPO) ## Build the AI agent image
+	$(call at-ref,$(AGENT_REPO),$(AGENT_REF))
 	docker build $(BUILD_FLAGS) --tag=frappe-ai-agent:local $(AGENT_REPO)
 
 mcp-image: $(MCP_REPO) ## Build the MCP server image
+	$(call at-ref,$(MCP_REPO),$(MCP_REF))
 	docker build $(BUILD_FLAGS) --tag=frappe-mcp-server:local --file=mcp/Dockerfile $(MCP_REPO)
 
 model: ## Check the configured models are present on the host
