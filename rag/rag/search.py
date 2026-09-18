@@ -1,11 +1,12 @@
 import json
 
 import frappe
+import requests
 from drive.api.permissions import user_has_permission
 from drive.utils import STATUS_ACTIVE
 from frappe.utils import cint
 
-from rag.ingest import embed
+from rag.ingest import CHUNK_CHARS, embed
 
 # Ranking happens before the permission filter, so over-fetch. WIDEN is the second pass for a
 # user who can read too little of the corpus for 10x to find anything of theirs.
@@ -13,12 +14,20 @@ CANDIDATES = 10
 WIDEN = 500
 
 
-@frappe.whitelist()
-def search(query: str, limit: int = 5) -> list[dict]:
+@frappe.whitelist(methods=["GET"])
+def search(query: str = "", limit: int = 5) -> list[dict]:
 	"""Chunks most similar to `query`, restricted to Drive files this user may read."""
 	frappe.has_permission("KB Chunk", "report", throw=True)
+	# A missing question is a 500 and a leaked traceback without the default; an over-long one is
+	# a 400 from Ollama, which has the same effect. Both arrive from the model, not a person.
+	query = (query or "").strip()[:CHUNK_CHARS]
+	if not query:
+		return []  # embedding whitespace answers confidently from an unrelated document
 	limit = max(1, min(cint(limit), 20))
-	vector = json.dumps(embed([query], prefix="search_query")[0], allow_nan=False)
+	try:
+		vector = json.dumps(embed([query], prefix="search_query")[0], allow_nan=False)
+	except requests.RequestException as exc:
+		frappe.throw(f"the knowledge base cannot be searched right now ({type(exc).__name__})")
 
 	out = []
 	for candidates in (limit * CANDIDATES, WIDEN):
