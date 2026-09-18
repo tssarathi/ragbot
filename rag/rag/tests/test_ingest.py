@@ -7,7 +7,7 @@ import frappe
 
 from rag import ingest
 from rag.ingest import CHUNK_CHARS, chunk, extract_text
-from rag.search import search
+from rag.search import _reachable, _readable, search
 
 TEXT = "Zurich café à la carte “quoted” – résumé"
 
@@ -290,6 +290,25 @@ class TestSearchPermissions(unittest.TestCase):
 			self.assertNotIn(files[1], seen, "unshared file leaked into results")
 		finally:
 			frappe.set_user("Administrator")
+			frappe.db.rollback()
+
+	def test_a_file_in_a_trashed_folder_stops_answering(self):
+		"""Drive trashes a folder without touching its children, and its permission check never
+		looks at an ancestor, so the child kept quoting itself after the folder was deleted."""
+		name = _a_drive_file(self)[0]
+		parent = frappe.db.get_value("File", name, "folder")
+		rows = [frappe._dict(file=name, seq=0, content="policy", distance=0.1)]
+		try:
+			self.assertTrue(_reachable(name), "an untouched file must stay readable")
+			self.assertEqual(_readable(rows, 5, {}), rows)
+			frappe.db.set_value("File", parent, "status", "Removed", update_modified=False)
+			self.assertFalse(_reachable(name))
+			self.assertEqual(_readable(rows, 5, {}), [])
+			# status is nullable, and `SUM(status != 'Active')` skips NULLs, so a missing
+			# status used to count as active and the file stayed readable
+			frappe.db.sql("UPDATE `tabFile` SET status = NULL WHERE name = %s", parent)
+			self.assertFalse(_reachable(name), "a NULL status must not read as active")
+		finally:
 			frappe.db.rollback()
 
 	def test_the_chunk_table_itself_is_not_readable(self):
