@@ -18,8 +18,8 @@ x-app: &app
       bind:
         create_host_path: false
   environment:
-    # ponytail: no pip install, so rag/pyproject.toml dependencies are not installed.
-    # Put them in the image, or switch to `bench pip install -e apps/rag`.
+    # ponytail: the app is importable by path alone, so rag/pyproject.toml is never installed
+    # and its dependencies come from drive's. Put them in the image when drive drops one.
     PYTHONPATH: /home/frappe/frappe-bench/apps/rag
     RAG_OLLAMA_URL: http://ollama:11434
     RAG_EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
