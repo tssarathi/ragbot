@@ -14,3 +14,4 @@ graphify-out/
 !.env.example
 __pycache__/
 .claude/
+.ruff_cache/
