@@ -41,7 +41,7 @@ endef
 
 setup: ## Build everything and bring the whole demo up from scratch
 	$(MAKE) image agent-image mcp-image
-	$(MAKE) up site keys
+	$(MAKE) up site
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t22
@@ -91,8 +91,6 @@ model: ## Check the configured models are present on the host
 
 up: $(FRAPPE_DOCKER) .env model ## Start the stack
 	$(COMPOSE) up -d
-	@test -n "$(call env-val,FRAPPE_API_KEY)" \
-	  || echo 'note: FRAPPE_API_KEY is empty, so the mcp container will keep restarting. Run `make keys` once the site exists.' >&2
 
 down: ## Stop the stack, keep the data
 	$(COMPOSE) down
@@ -125,17 +123,6 @@ wizard: ## Complete the ERPNext setup wizard (idempotent)
 	  || { echo 'wizard: company has no accounts, chart of accounts name is wrong' >&2; exit 1; }
 	@echo 'setup wizard complete'
 
-keys: .env ## Write Frappe API credentials for the MCP server into .env
-	@$(COMPOSE) exec -T backend bench --site "$(SITE)" execute \
-	  frappe.core.doctype.user.user.generate_keys --args '["Administrator"]' \
-	  | tr ',' '\n' \
-	  | sed -n -e 's/.*"api_key"[^"]*"\([^"]*\)".*/FRAPPE_API_KEY=\1/p' \
-	           -e 's/.*"api_secret"[^"]*"\([^"]*\)".*/FRAPPE_API_SECRET=\1/p' > .env.keys
-	@test "$$(wc -l < .env.keys)" -eq 2 || { rm -f .env.keys; echo 'keys: bench returned no credentials' >&2; exit 1; }
-	@grep -v '^FRAPPE_API_' .env > .env.new && cat .env.keys >> .env.new && mv .env.new .env && rm -f .env.keys
-	@$(COMPOSE) up -d mcp
-	@echo 'credentials written to .env'
-
 check: ## Run the quality gates: lint, tests, index health, empty Error Log
 	@ruff check rag/
 	@$(COMPOSE) exec -T backend bench --site "$(SITE)" run-tests --app rag
@@ -162,4 +149,4 @@ logs: ## Follow the logs
 shell: ## Open a shell in the backend container
 	$(COMPOSE) exec backend bash
 
-.PHONY: setup help model wizard image agent-image mcp-image up down destroy site keys check apps bench logs shell
+.PHONY: setup help model wizard image agent-image mcp-image up down destroy site check apps bench logs shell
