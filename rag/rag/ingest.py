@@ -11,10 +11,7 @@ OLLAMA_URL = os.environ.get("RAG_OLLAMA_URL", "http://ollama:11434")
 EMBED_MODEL = os.environ.get("RAG_EMBED_MODEL", "nomic-embed-text")
 EMBED_DIM = 768  # must match the VECTOR(768) column in kb/doctype/kb_chunk/kb_chunk.py
 EMBED_TIMEOUT = (5, 600)  # /api/embed stays silent until it has computed every vector
-# Measured at ~0.45s per chunk on CPU, so one whole book in one request would blow the read
-# timeout, lose the work and hold every vector in memory at once. The timeout only has to clear
-# one batch.
-EMBED_BATCH = 64
+EMBED_BATCH = 64  # ~0.45s per chunk, so a whole book in one request would blow that timeout
 
 WATCHED = ("status", "team")
 CHUNK_CHARS = 2000  # ~580 tokens of nomic-embed-text's 2048, sized for retrieval not for the window
@@ -23,19 +20,16 @@ CHUNK_CHARS = 2000  # ~580 tokens of nomic-embed-text's 2048, sized for retrieva
 def on_file_update(doc, method=None):
 	"""Queue a Drive file for (re)indexing when its content, status or team changes."""
 	if doc.is_folder or is_site_file(doc):
-		# A file that just left Drive keeps its chunks otherwise: nobody can ever match them
-		# and they still take candidate slots away from files that can be read.
+		# a file that just left Drive would keep chunks nobody can ever match
 		if doc.get_doc_before_save() and doc.has_value_changed("team"):
 			frappe.db.delete("KB Chunk", {"file": doc.name})
 		return
 	if doc.get_doc_before_save() and not any(doc.has_value_changed(f) for f in WATCHED):
 		return
-	# No deduplicate: it skips an enqueue while an earlier job is STARTED as well as QUEUED, and
-	# that job has already read the old status and bytes. Trash a file, restore it a second
-	# later, and the dedupe drops the restore: the job finishes, deletes every chunk, and the
-	# file stays unindexed forever. index_file is idempotent, so running it twice is cheap.
-	# Dotted string, not the callable: RQ unpickles a callable before frappe.init(),
-	# and importing drive.utils that early raises "object is not bound".
+	# No deduplicate: it also skips while an earlier job is STARTED, and that job read the old
+	# bytes, so trash-then-restore loses the restore. index_file is idempotent instead.
+	# Dotted string, not the callable: RQ unpickles before frappe.init(), and importing
+	# drive.utils that early raises "object is not bound".
 	frappe.enqueue(
 		"rag.ingest.index_file",
 		queue="long",
@@ -58,8 +52,7 @@ def extract_text(doc) -> str:
 		return ""
 	data = doc.manager.get_file(doc).read()
 	if mime.startswith("text/"):
-		# UTF-32 LE starts with the UTF-16 LE BOM, so it has to be tested first or its text
-		# decodes to NUL-interleaved nonsense
+		# UTF-32 LE opens with the UTF-16 LE BOM, so it has to be tested first
 		if data[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
 			return data.decode("utf-32", "replace")
 		if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
@@ -74,10 +67,8 @@ def extract_text(doc) -> str:
 		with pymupdf.open(stream=data, filetype="pdf") as pdf:
 			if pdf.needs_pass:
 				return ""
-			# "blocks" keeps paragraph boundaries; plain get_text() returns a whole page as
-			# one run-on paragraph that chunk() would cut mid-sentence. sort=True orders by
-			# (y1, x0): without it blocks arrive in content-stream order, so a PDF that writes
-			# its footer first indexes the footer first.
+			# "blocks" keeps paragraph boundaries, sort=True puts them in visual order: without
+			# it a PDF that draws its footer first gets indexed that way.
 			return "\n\n".join(
 				b[4].strip()
 				for page in pdf
@@ -153,15 +144,13 @@ def index_file(name: str):
 	if doc.is_folder or is_site_file(doc) or doc.status != STATUS_ACTIVE or doc._not_in_disk():
 		frappe.db.delete("KB Chunk", {"file": name})
 		return {"file": name, "chunks": 0}
-	# Read before deleting. Drive maps every read failure onto DoesNotExistError, so catching it
-	# here would commit an empty index on an S3 503 or an EIO. Let it raise and the job rolls back.
+	# Read before deleting, and do not catch: Drive maps every read failure onto
+	# DoesNotExistError, so an S3 blip would otherwise commit an empty index.
 	chunks = chunk(extract_text(doc))
 	vectors = embed(chunks)
 	frappe.db.delete("KB Chunk", {"file": name})
 	for seq, (content, vector) in enumerate(zip(chunks, vectors, strict=True)):
-		# Built by hand, not through the ORM: `embedding` is not a DocField, so an ORM insert
-		# omits it and a NOT NULL column then rejects the row. One statement also means the
-		# vector can never be missing for a row that exists.
+		# Raw SQL because `embedding` is not a DocField: an ORM insert would omit it.
 		frappe.db.sql(
 			"INSERT INTO `tabKB Chunk`"
 			" (name, creation, modified, owner, modified_by, file, team, seq, content, model, embedding)"
@@ -232,9 +221,8 @@ def reindex_all():
 
 	bench --site <site> execute rag.ingest.reindex_all
 
-	Frappe caps the queue at MAX_QUEUED_JOBS, so a big Drive stops early and reports
-	what is left. Re-run once the long queue drains. On any other failure use
-	`bench console`: bench execute hides the traceback behind a bogus NameError.
+	Frappe caps the queue, so a big Drive stops early and reports what is left. Re-run once
+	the long queue drains.
 	"""
 	names = frappe.get_all(
 		"File",
