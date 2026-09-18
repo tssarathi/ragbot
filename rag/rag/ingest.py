@@ -162,6 +162,10 @@ def index_file(name: str):
 		# an Ollama restart should not leave the file unindexed: execute_job re-runs this up to
 		# five times with backoff. Retrying here as well would multiply the attempts.
 		raise frappe.RetryBackgroundJobError(f"Ollama unreachable: {exc}") from exc
+	if not frappe.db.exists("File", name):
+		# embedding a large file holds this job for minutes; a hard delete in that window would
+		# otherwise leave rows pointing at nothing, which nothing ever cleans up
+		return {"file": name, "chunks": 0}
 	frappe.db.delete("KB Chunk", {"file": name})
 	for seq, (content, vector) in enumerate(zip(chunks, vectors, strict=True)):
 		# Raw SQL because `embedding` is not a DocField: an ORM insert would omit it.
