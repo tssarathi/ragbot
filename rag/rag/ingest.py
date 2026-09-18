@@ -214,7 +214,9 @@ def health():
 	)
 	problems = []
 	if stats["unembedded"]:
-		problems.append(f"{stats['unembedded']} chunks have no vector, and no vector sorts ahead of every real match")
+		problems.append(
+			f"{stats['unembedded']} chunks have no vector, and no vector sorts ahead of every real match"
+		)
 	if stats["zeroed"]:
 		problems.append(
 			f"{stats['zeroed']} chunks have an all-zero vector, which is the nearest neighbour of"
