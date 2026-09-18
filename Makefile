@@ -17,7 +17,7 @@ MCP_REF      ?= 6c14003
 SITE             ?= $(or $(call env-val,SITE_NAME),demo.localhost)
 ADMIN_PASSWORD   ?= $(or $(call env-val,ADMIN_PASSWORD),admin)
 DB_ROOT_PASSWORD ?= $(or $(call env-val,DB_PASSWORD),123)
-AI_MODEL         ?= $(or $(call env-val,AI_MODEL),phi4:14b)
+AI_MODEL         ?= $(or $(call env-val,AI_MODEL),gemma4:26b)
 EMBED_MODEL      ?= $(or $(call env-val,EMBED_MODEL),nomic-embed-text)
 AGENT_URL        ?= http://agent:8484
 

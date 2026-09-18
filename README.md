@@ -10,15 +10,17 @@ Requires Docker Compose 2.24 or newer, and on the host:
 
 - **~25 GB of free disk**: 20 GB of images plus build cache. The demo image alone is 5.2 GB
   and the Ollama image is 7 GB.
-- **RAM for the model**: `AI_MODEL` is a 14B model at about 9 GB resident, on top of the
-  Frappe stack.
+- **RAM for the model**: `AI_MODEL` is a 26B model at about 19 GB resident, on top of the
+  Frappe stack. A smaller model is a false economy here: measured across seven local models,
+  the 8B and 12B ones either never search the knowledge base or stop calling tools at all for
+  ordinary ERPNext questions.
 - **Ports 8080 and 8484** free.
 - **Both models already pulled**, `AI_MODEL` and `EMBED_MODEL`. Ollama runs in a container
   but mounts `~/.ollama/models` read-only, so it cannot download them itself. `make up`
   refuses to start without them.
 
 ```sh
-ollama pull phi4:14b && ollama pull nomic-embed-text
+ollama pull gemma4:26b && ollama pull nomic-embed-text
 make setup
 ```
 
