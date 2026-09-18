@@ -11,6 +11,12 @@ x-app: &app
       target: /home/frappe/frappe-bench/apps/rag
       bind:
         create_host_path: false
+    - type: bind
+      source: ./mariadb-client.cnf
+      target: /home/frappe/.my.cnf
+      read_only: true
+      bind:
+        create_host_path: false
   environment:
     # ponytail: no pip install, so rag/pyproject.toml dependencies are not installed.
     # Put them in the image, or switch to `bench pip install -e apps/rag`.
@@ -93,7 +99,7 @@ services:
       AI_AGENT_FRAPPE_URL: http://frontend:8080
       AI_AGENT_CORS_ORIGINS: '["http://${SITE_NAME:-demo.localhost}:${HTTP_PUBLISH_PORT:-8080}"]'
       AI_AGENT_LLM_BASE_URL: http://ollama:11434
-      AI_AGENT_LLM_MODEL: ${AI_MODEL:-phi4:14b}
+      AI_AGENT_LLM_MODEL: ${AI_MODEL:-gemma4:26b}
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8484/health').raise_for_status()"]
       interval: 30s

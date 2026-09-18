@@ -1,0 +1,7 @@
+# MDEV-35221: the 10.11 client in the bench image dumps VECTOR columns as strings and a restore
+# coerces every one to zeroes, silently. Fixed upstream in the 11.7.2 client; ask for hex here.
+[mariadb-dump]
+hex-blob
+
+[mysqldump]
+hex-blob
